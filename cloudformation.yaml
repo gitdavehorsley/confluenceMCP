@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'MCP Server for Atlassian Confluence Form Completion on AWS Lambda'
+
+Parameters:
+  ConfluenceBaseUrl:
+    Type: String
+    Description: Base URL of your Confluence instance (e.g., https://your-domain.atlassian.net)
+    NoEcho: false
+  
+  ConfluenceUsername:
+    Type: String
+    Description: Confluence username or email for API authentication
+    NoEcho: false
+  
+  ConfluenceApiToken:
+    Type: String
+    Description: Confluence API token (stored in Secrets Manager)
+    NoEcho: true
+  
+  LambdaFunctionName:
+    Type: String
+    Default: confluence-form-mcp-server
+    Description: Name for the Lambda function
+  
+  LambdaMemorySize:
+    Type: Number
+    Default: 256
+    Description: Memory size for Lambda function in MB
+    AllowedValues: [128, 256, 512, 1024, 2048]
+  
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+    Description: Timeout for Lambda function in seconds
+    MinValue: 3
+    MaxValue: 900
+
+Resources:
+  # Secrets Manager Secret for Confluence credentials
+  ConfluenceSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${LambdaFunctionName}-confluence-credentials'
+      Description: 'Confluence API credentials for MCP server'
+      SecretString: !Sub |
+        {
+          "base_url": "${ConfluenceBaseUrl}",
+          "username": "${ConfluenceUsername}",
+          "api_token": "${ConfluenceApiToken}"
+        }
+
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${LambdaFunctionName}-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref ConfluenceSecret
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LambdaFunctionName}*'
+
+  # CloudWatch Log Group
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${LambdaFunctionName}'
+      RetentionInDays: 14
+
+  # Lambda Function
+  ConfluenceMCPFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Runtime: python3.11
+      Handler: lambda_handler.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Placeholder - actual code will be deployed via package
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Deploy package required'}
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Environment:
+        Variables:
+          CONFLUENCE_SECRET_NAME: !Ref ConfluenceSecret
+          AWS_REGION: !Ref AWS::Region
+      Description: 'MCP Server for completing Confluence forms for AI intake process'
+
+  # Lambda Layer for dependencies (optional - can be created separately)
+  # Note: For production, you may want to create a Lambda Layer with dependencies
+  # This is a placeholder structure
+
+  # API Gateway (optional - if you want HTTP access)
+  # Uncomment if you need HTTP API access to the Lambda
+  # ApiGatewayRestApi:
+  #   Type: AWS::ApiGateway::RestApi
+  #   Properties:
+  #     Name: !Sub '${LambdaFunctionName}-api'
+  #     Description: 'API Gateway for Confluence MCP Server'
+  #
+  # ApiGatewayResource:
+  #   Type: AWS::ApiGateway::Resource
+  #   Properties:
+  #     RestApiId: !Ref ApiGatewayRestApi
+  #     ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+  #     PathPart: mcp
+  #
+  # ApiGatewayMethod:
+  #   Type: AWS::ApiGateway::Method
+  #   Properties:
+  #     RestApiId: !Ref ApiGatewayRestApi
+  #     ResourceId: !Ref ApiGatewayResource
+  #     HttpMethod: POST
+  #     AuthorizationType: NONE
+  #     Integration:
+  #       Type: AWS_PROXY
+  #       IntegrationHttpMethod: POST
+  #       Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConfluenceMCPFunction.Arn}/invocations'
+
+Outputs:
+  LambdaFunctionArn:
+    Description: 'ARN of the Lambda function'
+    Value: !GetAtt ConfluenceMCPFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+  
+  LambdaFunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref ConfluenceMCPFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'
+  
+  SecretArn:
+    Description: 'ARN of the Secrets Manager secret'
+    Value: !Ref ConfluenceSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-SecretArn'
+  
+  ExecutionRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'

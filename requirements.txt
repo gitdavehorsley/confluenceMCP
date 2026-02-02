@@ -1,0 +1,11 @@
+# MCP SDK
+mcp>=0.9.0
+
+# Atlassian Confluence API client
+atlassian-python-api>=3.41.0
+
+# AWS SDK (for Secrets Manager access)
+boto3>=1.34.0
+
+# Additional dependencies
+requests>=2.31.0
