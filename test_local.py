@@ -10,9 +10,19 @@ from mcp_server import list_tools, call_tool
 
 # Set test credentials (for local testing only)
 # In production, these come from AWS Secrets Manager
-os.environ['CONFLUENCE_BASE_URL'] = os.getenv('TEST_CONFLUENCE_URL', 'https://your-domain.atlassian.net')
-os.environ['CONFLUENCE_USERNAME'] = os.getenv('TEST_CONFLUENCE_USERNAME', 'your-username')
-os.environ['CONFLUENCE_API_TOKEN'] = os.getenv('TEST_CONFLUENCE_API_TOKEN', 'your-token')
+# Can be set via environment variables or command line arguments
+import sys
+
+if len(sys.argv) >= 4:
+    # Allow passing credentials as command line arguments
+    os.environ['CONFLUENCE_BASE_URL'] = sys.argv[1]
+    os.environ['CONFLUENCE_USERNAME'] = sys.argv[2]
+    os.environ['CONFLUENCE_API_TOKEN'] = sys.argv[3]
+else:
+    # Use environment variables
+    os.environ['CONFLUENCE_BASE_URL'] = os.getenv('TEST_CONFLUENCE_URL', os.getenv('CONFLUENCE_BASE_URL', ''))
+    os.environ['CONFLUENCE_USERNAME'] = os.getenv('TEST_CONFLUENCE_USERNAME', os.getenv('CONFLUENCE_USERNAME', ''))
+    os.environ['CONFLUENCE_API_TOKEN'] = os.getenv('TEST_CONFLUENCE_API_TOKEN', os.getenv('CONFLUENCE_API_TOKEN', ''))
 
 
 async def test_list_tools():

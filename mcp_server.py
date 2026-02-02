@@ -72,6 +72,11 @@ async def list_tools() -> List[Tool]:
                     "space_key": {
                         "type": "string",
                         "description": "The Confluence space key (optional, will be inferred from page if not provided)"
+                    },
+                    "create_summary_page": {
+                        "type": "boolean",
+                        "description": "For Smart Forms/iframe forms, create a summary page with submitted data (default: true)",
+                        "default": True
                     }
                 },
                 "required": ["page_id", "form_data"]
@@ -116,6 +121,7 @@ async def complete_form(arguments: Dict[str, Any]) -> List[TextContent]:
     page_id = arguments.get("page_id")
     form_data = arguments.get("form_data", {})
     space_key = arguments.get("space_key")
+    create_summary_page = arguments.get("create_summary_page", True)
     
     if not page_id:
         raise ValueError("page_id is required")
@@ -127,7 +133,7 @@ async def complete_form(arguments: Dict[str, Any]) -> List[TextContent]:
         confluence = get_confluence_client()
         
         # Get the current page content
-        page = confluence.get_page_by_id(page_id, expand="body.storage,version")
+        page = confluence.get_page_by_id(page_id, expand="body.storage,version,space")
         
         if not page:
             raise ValueError(f"Page {page_id} not found")
@@ -136,29 +142,51 @@ async def complete_form(arguments: Dict[str, Any]) -> List[TextContent]:
         if not space_key:
             space_key = page.get("space", {}).get("key")
         
-        # Extract current content
+        # Check if this is a Smart Forms iframe (external form)
         current_content = page["body"]["storage"]["value"]
+        is_smart_forms = "smart-forms.saasjet.com" in current_content or "iframe" in current_content.lower()
         
-        # Update form fields in the content
-        # This assumes the form uses Confluence macros or custom fields
-        # Adjust this logic based on your specific form structure
-        updated_content = update_form_fields(current_content, form_data)
-        
-        # Update the page
-        confluence.update_page(
-            page_id=page_id,
-            title=page["title"],
-            body=updated_content,
-            version=page["version"]["number"] + 1
-        )
-        
-        result = {
-            "success": True,
-            "page_id": page_id,
-            "page_title": page["title"],
-            "updated_fields": list(form_data.keys()),
-            "message": "Form completed successfully"
-        }
+        if is_smart_forms and create_summary_page:
+            # For Smart Forms, create a summary page with the submitted data
+            summary_title = f"Form Submission: {page['title']} - {form_data.get('project_name', 'New Submission')}"
+            summary_body = create_form_summary_page(form_data, page)
+            
+            # Create the summary page
+            new_page = confluence.create_page(
+                space=space_key,
+                title=summary_title,
+                body=summary_body,
+                parent_id=page_id  # Make it a child of the form page
+            )
+            
+            result = {
+                "success": True,
+                "original_page_id": page_id,
+                "original_page_title": page["title"],
+                "summary_page_id": new_page["id"],
+                "summary_page_title": summary_title,
+                "form_data": form_data,
+                "message": "Form submission recorded in summary page (Smart Forms detected)"
+            }
+        else:
+            # For native Confluence forms, update the page directly
+            updated_content = update_form_fields(current_content, form_data)
+            
+            # Update the page
+            confluence.update_page(
+                page_id=page_id,
+                title=page["title"],
+                body=updated_content,
+                version=page["version"]["number"] + 1
+            )
+            
+            result = {
+                "success": True,
+                "page_id": page_id,
+                "page_title": page["title"],
+                "updated_fields": list(form_data.keys()),
+                "message": "Form completed successfully"
+            }
         
         return [TextContent(
             type="text",
@@ -267,6 +295,42 @@ def extract_form_fields(content: str) -> List[Dict[str, str]]:
         })
     
     return fields
+
+
+def create_form_summary_page(form_data: Dict[str, Any], original_page: Dict[str, Any]) -> str:
+    """
+    Create a Confluence page body with form submission data.
+    Formats the data in a readable table structure.
+    """
+    # Get current timestamp
+    from datetime import datetime
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    
+    # Build the page content using Confluence storage format
+    content_parts = [
+        "<h2>Form Submission Summary</h2>",
+        f"<p><strong>Submitted:</strong> {timestamp}</p>",
+        f"<p><strong>Original Form:</strong> {original_page.get('title', 'Unknown')}</p>",
+        "<hr/>",
+        "<h3>Submitted Data</h3>",
+        "<table>",
+        "<tr><th>Field</th><th>Value</th></tr>"
+    ]
+    
+    # Add form data as table rows
+    for field_name, field_value in form_data.items():
+        # Escape HTML in values
+        field_value_str = str(field_value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        field_name_str = str(field_name).replace("_", " ").title()
+        content_parts.append(f"<tr><td><strong>{field_name_str}</strong></td><td>{field_value_str}</td></tr>")
+    
+    content_parts.extend([
+        "</table>",
+        "<hr/>",
+        "<p><em>This submission was automatically created by the Confluence MCP Server.</em></p>"
+    ])
+    
+    return "".join(content_parts)
 
 
 async def main():
